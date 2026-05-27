@@ -10,10 +10,11 @@ use db::models::{
     workspace::{Workspace, WorkspaceError},
 };
 use deployment::Deployment;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use services::services::{container::ContainerService, diff_stream, remote_sync};
 use sqlx::Error as SqlxError;
 use utils::response::ApiResponse;
+use uuid::Uuid;
 use workspace_manager::WorkspaceManager;
 
 use crate::{DeploymentImpl, error::ApiError};
@@ -24,6 +25,18 @@ pub struct DeleteWorkspaceQuery {
     pub delete_remote: bool,
     #[serde(default)]
     pub delete_branches: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BulkDeleteArchivedSkipped {
+    pub workspace_id: Uuid,
+    pub reason: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BulkDeleteArchivedResponse {
+    pub deleted: usize,
+    pub skipped: Vec<BulkDeleteArchivedSkipped>,
 }
 
 pub async fn get_workspaces(
@@ -180,6 +193,111 @@ pub async fn delete_workspace(
     WorkspaceManager::spawn_workspace_deletion_cleanup(deletion_context, query.delete_branches);
 
     Ok((StatusCode::ACCEPTED, ResponseJson(ApiResponse::success(()))))
+}
+
+pub async fn bulk_delete_archived(
+    State(deployment): State<DeploymentImpl>,
+    Query(query): Query<DeleteWorkspaceQuery>,
+) -> Result<
+    (
+        StatusCode,
+        ResponseJson<ApiResponse<BulkDeleteArchivedResponse>>,
+    ),
+    ApiError,
+> {
+    let pool = &deployment.db().pool;
+    let workspace_manager = deployment.workspace_manager();
+
+    let archived: Vec<Workspace> = Workspace::fetch_all(pool)
+        .await?
+        .into_iter()
+        .filter(|w| w.archived)
+        .collect();
+
+    let mut deleted = 0usize;
+    let mut skipped: Vec<BulkDeleteArchivedSkipped> = Vec::new();
+
+    for workspace in archived {
+        let workspace_id = workspace.id;
+
+        if ExecutionProcess::has_running_non_dev_server_processes_for_workspace(pool, workspace_id)
+            .await?
+        {
+            skipped.push(BulkDeleteArchivedSkipped {
+                workspace_id,
+                reason: "workspace has running processes".to_string(),
+            });
+            continue;
+        }
+
+        let dev_servers =
+            ExecutionProcess::find_running_dev_servers_by_workspace(pool, workspace_id).await?;
+        for dev_server in dev_servers {
+            tracing::info!(
+                "Stopping dev server {} before deleting workspace {}",
+                dev_server.id,
+                workspace_id
+            );
+            if let Err(e) = deployment
+                .container()
+                .stop_execution(&dev_server, ExecutionProcessStatus::Killed)
+                .await
+            {
+                tracing::error!(
+                    "Failed to stop dev server {} for workspace {}: {}",
+                    dev_server.id,
+                    workspace_id,
+                    e
+                );
+            }
+        }
+
+        let managed_workspace = workspace_manager.load_managed_workspace(workspace).await?;
+        let deletion_context = managed_workspace.prepare_deletion_context().await?;
+        let rows_affected = managed_workspace.delete_record().await?;
+
+        if rows_affected == 0 {
+            skipped.push(BulkDeleteArchivedSkipped {
+                workspace_id,
+                reason: "workspace vanished before deletion".to_string(),
+            });
+            continue;
+        }
+
+        deployment
+            .track_if_analytics_allowed(
+                "workspace_deleted",
+                serde_json::json!({
+                    "workspace_id": workspace_id.to_string(),
+                    "bulk": true,
+                }),
+            )
+            .await;
+
+        if query.delete_remote
+            && let Ok(client) = deployment.remote_client()
+        {
+            match client.delete_workspace(workspace_id).await {
+                Ok(()) => tracing::info!("Deleted remote workspace for {}", workspace_id),
+                Err(e) => tracing::warn!(
+                    "Failed to delete remote workspace for {}: {}",
+                    workspace_id,
+                    e
+                ),
+            }
+        }
+
+        WorkspaceManager::spawn_workspace_deletion_cleanup(deletion_context, query.delete_branches);
+        deleted += 1;
+    }
+
+    Ok((
+        StatusCode::ACCEPTED,
+        ResponseJson(ApiResponse::success(BulkDeleteArchivedResponse {
+            deleted,
+            skipped,
+        })),
+    ))
 }
 
 #[axum::debug_handler]

@@ -1,6 +1,10 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useParams } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
+import { useQueryClient } from '@tanstack/react-query';
+import { ConfirmDialog } from '@vibe/ui/components/ConfirmDialog';
+import { workspacesApi } from '@/shared/lib/api';
+import { workspaceSummaryKeys } from '@/shared/hooks/workspaceSummaryKeys';
 import { useWorkspaceContext } from '@/shared/hooks/useWorkspaceContext';
 import { useUserContext } from '@/shared/hooks/useUserContext';
 import { useScratch } from '@/shared/hooks/useScratch';
@@ -596,6 +600,53 @@ export function WorkspacesSidebarContainer({
     }
   }, [navigateToCreate, isMobile, setMobileActiveTab]);
 
+  const queryClient = useQueryClient();
+  const [isBulkDeletingArchived, setIsBulkDeletingArchived] = useState(false);
+
+  const handleBulkDeleteArchived = useCallback(async () => {
+    if (archivedWorkspaces.length === 0 || isBulkDeletingArchived) return;
+
+    const result = await ConfirmDialog.show({
+      title: t('workspaces.bulkDeleteArchivedTitle'),
+      message: t('workspaces.bulkDeleteArchivedMessage', {
+        count: archivedWorkspaces.length,
+      }),
+      confirmText: t('workspaces.bulkDeleteArchivedConfirm'),
+      variant: 'destructive',
+    });
+
+    if (result !== 'confirmed') return;
+
+    setIsBulkDeletingArchived(true);
+    try {
+      const summary = await workspacesApi.bulkDeleteArchived();
+      queryClient.invalidateQueries({ queryKey: workspaceSummaryKeys.all });
+      if (summary.skipped.length > 0) {
+        await ConfirmDialog.show({
+          title: t('workspaces.bulkDeleteArchivedPartialTitle'),
+          message: t('workspaces.bulkDeleteArchivedPartialMessage', {
+            deleted: summary.deleted,
+            skipped: summary.skipped.length,
+          }),
+          confirmText: t('common:ok'),
+          showCancelButton: false,
+        });
+      }
+    } catch (error) {
+      await ConfirmDialog.show({
+        title: t('common:error'),
+        message:
+          error instanceof Error
+            ? error.message
+            : t('workspaces.bulkDeleteArchivedError'),
+        confirmText: t('common:ok'),
+        showCancelButton: false,
+      });
+    } finally {
+      setIsBulkDeletingArchived(false);
+    }
+  }, [archivedWorkspaces.length, isBulkDeletingArchived, queryClient, t]);
+
   const handleOpenWorkspaceActions = useCallback((workspaceId: string) => {
     CommandBarDialog.show({
       page: 'workspaceActions',
@@ -693,6 +744,8 @@ export function WorkspacesSidebarContainer({
       onSelectCreate={navigateToCreate}
       showArchive={showArchive}
       onShowArchiveChange={setShowArchive}
+      onBulkDeleteArchived={handleBulkDeleteArchived}
+      isBulkDeletingArchived={isBulkDeletingArchived}
       layoutMode={layoutMode}
       onToggleLayoutMode={toggleLayoutMode}
       onLoadMore={handleLoadMore}

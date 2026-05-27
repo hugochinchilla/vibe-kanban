@@ -48,6 +48,7 @@ pub fn router(deployment: &DeploymentImpl) -> Router<DeploymentImpl> {
         )
         .route("/start", post(create::create_and_start_workspace))
         .route("/from-pr", post(pr::create_workspace_from_pr))
+        .route("/bulk-delete-archived", post(core::bulk_delete_archived))
         .route("/streams/ws", get(streams::stream_workspaces_ws))
         .route(
             "/summaries",

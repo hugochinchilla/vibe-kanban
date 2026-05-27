@@ -6,6 +6,7 @@ import {
   ArchiveIcon,
   StackIcon,
   SpinnerIcon,
+  TrashIcon,
 } from '@phosphor-icons/react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '../lib/cn';
@@ -67,6 +68,10 @@ export interface WorkspacesSidebarProps {
   showArchive?: boolean;
   /** Handler for toggling archive view */
   onShowArchiveChange?: (show: boolean) => void;
+  /** Handler for deleting every archived workspace */
+  onBulkDeleteArchived?: () => void;
+  /** Whether a bulk delete is currently in flight */
+  isBulkDeletingArchived?: boolean;
   /** Layout mode for active workspaces */
   layoutMode?: WorkspaceLayoutMode;
   /** Handler for toggling layout mode */
@@ -181,6 +186,8 @@ export function WorkspacesSidebar({
   onSelectCreate,
   showArchive = false,
   onShowArchiveChange,
+  onBulkDeleteArchived,
+  isBulkDeletingArchived = false,
   layoutMode = 'flat',
   onToggleLayoutMode,
   onLoadMore,
@@ -325,9 +332,30 @@ export function WorkspacesSidebar({
         ) : showArchive ? (
           /* Archived workspaces view */
           <div className="flex flex-col gap-base">
-            <span className="text-sm font-medium text-low px-base">
-              {t('common:workspaces.archived')}
-            </span>
+            <div className="flex items-center justify-between px-base">
+              <span className="text-sm font-medium text-low">
+                {t('common:workspaces.archived')}
+              </span>
+              {onBulkDeleteArchived && archivedWorkspaces.length > 0 && (
+                <button
+                  type="button"
+                  onClick={onBulkDeleteArchived}
+                  disabled={isBulkDeletingArchived}
+                  aria-label={t('common:workspaces.bulkDeleteArchived')}
+                  title={t('common:workspaces.bulkDeleteArchived')}
+                  className="text-low hover:text-destructive disabled:cursor-not-allowed disabled:opacity-50 transition-colors duration-100"
+                >
+                  {isBulkDeletingArchived ? (
+                    <SpinnerIcon
+                      className="size-icon-xs animate-spin"
+                      weight="bold"
+                    />
+                  ) : (
+                    <TrashIcon className="size-icon-xs" />
+                  )}
+                </button>
+              )}
+            </div>
             {archivedWorkspaces.length === 0 ? (
               <span className="text-sm text-low opacity-60 px-base">
                 {t('common:workspaces.noArchived')}
