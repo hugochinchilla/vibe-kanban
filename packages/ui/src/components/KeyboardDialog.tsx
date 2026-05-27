@@ -142,6 +142,8 @@ const Dialog = React.forwardRef<
       />
       <div
         ref={setDialogRef}
+        role="dialog"
+        aria-modal="true"
         className={cn(
           'relative z-[10000] flex flex-col w-full max-w-xl gap-4 bg-primary p-6 shadow-lg duration-200 sm:rounded-lg my-8',
           className
