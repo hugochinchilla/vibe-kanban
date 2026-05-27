@@ -472,6 +472,25 @@ export const workspacesApi = {
     return handleApiResponse<void>(response);
   },
 
+  bulkDeleteArchived: async (
+    deleteBranches?: boolean
+  ): Promise<{
+    deleted: number;
+    skipped: { workspace_id: string; reason: string }[];
+  }> => {
+    const params = new URLSearchParams();
+    if (deleteBranches) {
+      params.set('delete_branches', 'true');
+    }
+    const queryString = params.toString();
+    const url = `/api/workspaces/bulk-delete-archived${queryString ? `?${queryString}` : ''}`;
+    const response = await makeRequest(url, { method: 'POST' });
+    return handleApiResponse<{
+      deleted: number;
+      skipped: { workspace_id: string; reason: string }[];
+    }>(response);
+  },
+
   linkToIssue: async (
     workspaceId: string,
     projectId: string,
