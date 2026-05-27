@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Dialog,
@@ -30,11 +30,29 @@ const RenameWorkspaceDialogImpl = NiceModal.create<RenameWorkspaceDialogProps>(
     const [name, setName] = useState<string>(currentName);
     const [error, setError] = useState<string | null>(null);
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const inputRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
-      setName(currentName);
-      setError(null);
-    }, [currentName]);
+      if (modal.visible) {
+        setName(currentName);
+        setError(null);
+        setIsSubmitting(false);
+      }
+    }, [modal.visible, currentName]);
+
+    useEffect(() => {
+      if (!modal.visible) return;
+      // Defer to next frame so the select() runs after any sibling
+      // effects (e.g. KeyboardDialog's hotkey-scope effect) that
+      // would otherwise re-render and clear the selection.
+      const id = requestAnimationFrame(() => {
+        const el = inputRef.current;
+        if (!el) return;
+        el.focus();
+        el.select();
+      });
+      return () => cancelAnimationFrame(id);
+    }, [modal.visible]);
 
     const handleConfirm = async () => {
       const trimmedName = name.trim();
@@ -90,6 +108,7 @@ const RenameWorkspaceDialogImpl = NiceModal.create<RenameWorkspaceDialogProps>(
                 {t('workspaces.rename.nameLabel')}
               </label>
               <Input
+                ref={inputRef}
                 id="workspace-name"
                 type="text"
                 value={name}
@@ -104,7 +123,6 @@ const RenameWorkspaceDialogImpl = NiceModal.create<RenameWorkspaceDialogProps>(
                 }}
                 placeholder={t('workspaces.rename.placeholder')}
                 disabled={isSubmitting}
-                autoFocus
               />
               {error && <p className="text-sm text-destructive">{error}</p>}
             </div>
